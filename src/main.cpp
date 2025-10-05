@@ -2,9 +2,18 @@
 #include <iostream>
 #include <string>
 #include "ClipboardMonitor.h"
+#include "ClipboardHistory.h"
+#include "SystemTray.h"
+#include "HotkeyManager.h"
 
-// Global pointer to monitor for access in window procedure
+// Custom message for system tray
+#define WM_TRAYICON (WM_USER + 1)
+
+// Global pointers for access in window procedure
 ClipboardMonitor* g_monitor = nullptr;
+ClipboardHistory* g_history = nullptr;
+SystemTray* g_tray = nullptr;
+HotkeyManager* g_hotkeyMgr = nullptr;
 
 // Function to get clipboard text
 std::wstring GetClipboardText() {
@@ -32,6 +41,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_CLIPBOARDUPDATE:
             if (g_monitor) {
                 g_monitor->OnClipboardUpdate();
+            }
+            return 0;
+        case WM_TRAYICON:
+            if (g_tray) {
+                g_tray->OnTrayMessage(wParam, lParam);
+            }
+            return 0;
+        case WM_HOTKEY:
+            if (g_hotkeyMgr) {
+                g_hotkeyMgr->OnHotkey(static_cast<int>(wParam));
             }
             return 0;
         case WM_DESTROY:
@@ -77,6 +96,10 @@ int main() {
 
     std::cout << "Window created successfully!" << std::endl;
 
+    // Initialize clipboard history
+    ClipboardHistory history(100);
+    g_history = &history;
+
     // Initialize clipboard monitor
     ClipboardMonitor monitor;
     g_monitor = &monitor;
@@ -86,11 +109,13 @@ int main() {
         return 1;
     }
 
-    // Set callback to print clipboard content
+    // Set callback to add to history and print
     monitor.SetCallback([]() {
         std::wstring clipboardText = GetClipboardText();
         if (!clipboardText.empty()) {
+            g_history->AddEntry(clipboardText);
             std::wcout << L"[CLIPBOARD CHANGE] Text: " << clipboardText << std::endl;
+            std::wcout << L"[HISTORY] Total entries: " << g_history->GetCount() << std::endl;
         } else {
             std::cout << "[CLIPBOARD CHANGE] Non-text data or empty" << std::endl;
         }
@@ -101,9 +126,69 @@ int main() {
         return 1;
     }
 
+    // Initialize system tray
+    SystemTray tray;
+    g_tray = &tray;
+
+    if (!tray.Initialize(hwnd, WM_TRAYICON)) {
+        std::cerr << "Failed to initialize system tray" << std::endl;
+        return 1;
+    }
+
+    // Set tray menu callback
+    tray.SetMenuCallback([&](UINT menuId) {
+        switch (menuId) {
+            case 1001: // ID_SHOW_HISTORY
+                std::cout << "Show History clicked" << std::endl;
+                std::cout << "Current history entries: " << history.GetCount() << std::endl;
+                break;
+            case 1002: // ID_CLEAR_HISTORY
+                std::cout << "Clear History clicked" << std::endl;
+                history.Clear();
+                std::cout << "History cleared!" << std::endl;
+                break;
+            case 1003: // ID_EXIT
+                std::cout << "Exit clicked" << std::endl;
+                PostQuitMessage(0);
+                break;
+        }
+    });
+
+    if (!tray.Show()) {
+        std::cerr << "Failed to show system tray icon" << std::endl;
+        return 1;
+    }
+
+    // Initialize hotkey manager
+    HotkeyManager hotkeyMgr;
+    g_hotkeyMgr = &hotkeyMgr;
+
+    if (!hotkeyMgr.Initialize(hwnd)) {
+        std::cerr << "Failed to initialize hotkey manager" << std::endl;
+        return 1;
+    }
+
+    // Register Ctrl+Shift+V to show history
+    hotkeyMgr.RegisterHotkey(MOD_CONTROL | MOD_SHIFT, 'V', []() {
+        std::cout << "\n[HOTKEY] Ctrl+Shift+V pressed - Show History" << std::endl;
+        std::cout << "Current history entries: " << g_history->GetCount() << std::endl;
+
+        auto entries = g_history->GetEntries();
+        int count = 0;
+        for (const auto& entry : entries) {
+            if (count >= 5) break; // Show only last 5 for now
+            std::wcout << L"  " << (count + 1) << L". " << entry.text.substr(0, 50);
+            if (entry.text.length() > 50) std::wcout << L"...";
+            std::wcout << std::endl;
+            count++;
+        }
+    });
+
     std::cout << "\nClipboard monitoring active!" << std::endl;
+    std::cout << "System tray icon created - right-click for menu" << std::endl;
+    std::cout << "Hotkey registered: Ctrl+Shift+V to show history" << std::endl;
     std::cout << "Copy some text to test the monitor..." << std::endl;
-    std::cout << "Press Ctrl+C to exit.\n" << std::endl;
+    std::cout << "Press Ctrl+C to exit or use tray menu.\n" << std::endl;
 
     // Message loop
     MSG msg;
@@ -113,5 +198,8 @@ int main() {
     }
 
     g_monitor = nullptr;
+    g_history = nullptr;
+    g_tray = nullptr;
+    g_hotkeyMgr = nullptr;
     return 0;
 }
