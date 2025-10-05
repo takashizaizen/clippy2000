@@ -1,11 +1,15 @@
 #include <windows.h>
+#include <shellapi.h>
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <limits>
 #include "ClipboardMonitor.h"
 #include "ClipboardHistory.h"
 #include "SystemTray.h"
 #include "HotkeyManager.h"
 #include "Storage.h"
+#include "ClipboardUtils.h"
 
 // Custom message for system tray
 #define WM_TRAYICON (WM_USER + 1)
@@ -17,24 +21,25 @@ SystemTray* g_tray = nullptr;
 HotkeyManager* g_hotkeyMgr = nullptr;
 Storage* g_storage = nullptr;
 
-// Function to get clipboard text
-std::wstring GetClipboardText() {
-    if (!OpenClipboard(nullptr)) {
-        return L"";
-    }
+// Flag to ignore clipboard changes we caused ourselves
+bool g_ignoreNextClipboardChange = false;
 
-    std::wstring text;
-    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-    if (hData != nullptr) {
-        wchar_t* pszText = static_cast<wchar_t*>(GlobalLock(hData));
-        if (pszText != nullptr) {
-            text = pszText;
-            GlobalUnlock(hData);
-        }
+// Helper to display an entry
+void DisplayEntry(const ClipboardEntry& entry, int index) {
+    std::wcout << L"  " << index << L". ";
+    switch (entry.type) {
+        case ClipboardDataType::Text:
+            std::wcout << L"[TEXT] " << entry.text.substr(0, 60);
+            if (entry.text.length() > 60) std::wcout << L"...";
+            break;
+        case ClipboardDataType::Files:
+            std::wcout << L"[FILES] " << entry.text;
+            break;
+        case ClipboardDataType::Image:
+            std::wcout << L"[IMAGE]";
+            break;
     }
-
-    CloseClipboard();
-    return text;
+    std::wcout << std::endl;
 }
 
 // Window procedure to handle messages
@@ -129,15 +134,50 @@ int main() {
 
     // Set callback to add to history, save to storage, and print
     monitor.SetCallback([]() {
-        std::wstring clipboardText = GetClipboardText();
-        if (!clipboardText.empty()) {
-            ClipboardEntry entry(clipboardText);
-            g_history->AddEntry(clipboardText);
-            g_storage->SaveEntry(entry);
-            std::wcout << L"[CLIPBOARD CHANGE] Text: " << clipboardText << std::endl;
+        // Check if we should ignore this change (we caused it ourselves)
+        if (g_ignoreNextClipboardChange) {
+            g_ignoreNextClipboardChange = false;
+            return;
+        }
+
+        ClipboardDataType dataType = ClipboardUtils::GetClipboardDataType();
+        std::wstring data;
+        ClipboardEntry entry;
+
+        switch (dataType) {
+            case ClipboardDataType::Text:
+                data = ClipboardUtils::GetClipboardText();
+                if (!data.empty()) {
+                    entry = ClipboardEntry(data, ClipboardDataType::Text);
+                    g_history->AddEntry(data, ClipboardDataType::Text);
+                    g_storage->SaveEntry(entry);
+                    std::wcout << L"[CLIPBOARD CHANGE] Text: " << data.substr(0, 100);
+                    if (data.length() > 100) std::wcout << L"...";
+                    std::wcout << std::endl;
+                }
+                break;
+
+            case ClipboardDataType::Files:
+                data = ClipboardUtils::GetClipboardFiles();
+                if (!data.empty()) {
+                    entry = ClipboardEntry(data, ClipboardDataType::Files);
+                    g_history->AddEntry(data, ClipboardDataType::Files);
+                    g_storage->SaveEntry(entry);
+                    std::wcout << L"[CLIPBOARD CHANGE] Files: " << data << std::endl;
+                }
+                break;
+
+            case ClipboardDataType::Image:
+                data = L"[Image]";
+                entry = ClipboardEntry(data, ClipboardDataType::Image);
+                g_history->AddEntry(data, ClipboardDataType::Image);
+                g_storage->SaveEntry(entry);
+                std::cout << "[CLIPBOARD CHANGE] Image copied" << std::endl;
+                break;
+        }
+
+        if (!data.empty()) {
             std::wcout << L"[HISTORY] Total entries: " << g_history->GetCount() << std::endl;
-        } else {
-            std::cout << "[CLIPBOARD CHANGE] Non-text data or empty" << std::endl;
         }
     });
 
@@ -192,22 +232,96 @@ int main() {
     hotkeyMgr.RegisterHotkey(MOD_CONTROL | MOD_SHIFT, 'V', []() {
         std::cout << "\n[HOTKEY] Ctrl+Shift+V pressed - Show History" << std::endl;
         std::cout << "Current history entries: " << g_history->GetCount() << std::endl;
+        std::cout << "To restore an entry, use Ctrl+Shift+R and enter the number" << std::endl;
+        std::cout << std::endl;
 
         auto entries = g_history->GetEntries();
-        int count = 0;
+        int index = 1;
         for (const auto& entry : entries) {
-            if (count >= 5) break; // Show only last 5 for now
-            std::wcout << L"  " << (count + 1) << L". " << entry.text.substr(0, 50);
-            if (entry.text.length() > 50) std::wcout << L"...";
-            std::wcout << std::endl;
-            count++;
+            if (index > 10) break; // Show only last 10
+            DisplayEntry(entry, index);
+            index++;
         }
     });
 
-    std::cout << "\nClipboard monitoring active!" << std::endl;
-    std::cout << "System tray icon created - right-click for menu" << std::endl;
-    std::cout << "Hotkey registered: Ctrl+Shift+V to show history" << std::endl;
-    std::cout << "Copy some text to test the monitor..." << std::endl;
+    // Register Ctrl+Shift+F to search history
+    hotkeyMgr.RegisterHotkey(MOD_CONTROL | MOD_SHIFT, 'F', []() {
+        std::cout << "\n[HOTKEY] Ctrl+Shift+F pressed - Search History" << std::endl;
+        std::cout << "Enter search term (or press Enter to cancel): " << std::flush;
+
+        // Clear input buffer
+        std::cin.clear();
+        std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
+
+        std::string queryStr;
+        if (!std::getline(std::cin, queryStr) || queryStr.empty()) {
+            std::cout << "Search cancelled" << std::endl;
+            return;
+        }
+
+        // Convert to wstring
+        std::wstring query(queryStr.begin(), queryStr.end());
+
+        auto results = g_history->Search(query);
+        std::cout << "\nFound " << results.size() << " matching entries:" << std::endl;
+
+        int index = 1;
+        for (const auto& entry : results) {
+            if (index > 10) break;
+            DisplayEntry(entry, index);
+            index++;
+        }
+    });
+
+    // Register Ctrl+Shift+R to restore an entry
+    hotkeyMgr.RegisterHotkey(MOD_CONTROL | MOD_SHIFT, 'R', []() {
+        std::cout << "\n[HOTKEY] Ctrl+Shift+R pressed - Restore Entry" << std::endl;
+        std::cout << "Enter entry number to restore (1-" << g_history->GetCount() << "): " << std::flush;
+
+        // Clear input buffer
+        std::cin.clear();
+        std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
+
+        std::string input;
+        if (!std::getline(std::cin, input)) {
+            std::cout << "Input cancelled" << std::endl;
+            return;
+        }
+
+        try {
+            int index = std::stoi(input);
+            if (index < 1 || index > static_cast<int>(g_history->GetCount())) {
+                std::cout << "Invalid entry number" << std::endl;
+                return;
+            }
+
+            auto entries = g_history->GetEntries();
+            const ClipboardEntry& entry = entries[index - 1];
+
+            // Set flag to ignore the clipboard change we're about to make
+            g_ignoreNextClipboardChange = true;
+
+            if (ClipboardUtils::RestoreEntry(entry)) {
+                std::wcout << L"✓ Restored to clipboard: ";
+                DisplayEntry(entry, index);
+            } else {
+                g_ignoreNextClipboardChange = false; // Reset flag on failure
+                std::cout << "Failed to restore entry to clipboard" << std::endl;
+            }
+        } catch (...) {
+            std::cout << "Invalid input" << std::endl;
+        }
+    });
+
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "  Clippy2000 - Clipboard Manager" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "\nMonitoring: Text, Images, and Files" << std::endl;
+    std::cout << "\nHotkeys:" << std::endl;
+    std::cout << "  Ctrl+Shift+V - Show clipboard history (last 10 entries)" << std::endl;
+    std::cout << "  Ctrl+Shift+F - Search clipboard history" << std::endl;
+    std::cout << "  Ctrl+Shift+R - Restore entry by number" << std::endl;
+    std::cout << "\nSystem tray icon created - right-click for menu" << std::endl;
     std::cout << "Press Ctrl+C to exit or use tray menu.\n" << std::endl;
 
     // Message loop

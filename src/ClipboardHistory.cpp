@@ -8,7 +8,7 @@ ClipboardHistory::ClipboardHistory(size_t maxEntries)
     m_entries.reserve(maxEntries);
 }
 
-void ClipboardHistory::AddEntry(const std::wstring& text) {
+void ClipboardHistory::AddEntry(const std::wstring& text, ClipboardDataType type) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     // Ignore empty text
@@ -22,7 +22,7 @@ void ClipboardHistory::AddEntry(const std::wstring& text) {
     }
 
     // Add new entry at the beginning (newest first)
-    m_entries.insert(m_entries.begin(), ClipboardEntry(text));
+    m_entries.insert(m_entries.begin(), ClipboardEntry(text, type));
 
     // Remove oldest entry if we exceed max size
     if (m_entries.size() > m_maxEntries) {
