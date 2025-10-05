@@ -71,6 +71,19 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                 if (pNmhdr->idFrom == ID_LISTVIEW) {
                     if (pNmhdr->code == NM_DBLCLK) {
                         pThis->OnListDoubleClick();
+                    } else if (pNmhdr->code == NM_CLICK || pNmhdr->code == NM_RCLICK) {
+                        // Get which item was clicked
+                        NMITEMACTIVATE* pItemActivate = reinterpret_cast<NMITEMACTIVATE*>(lParam);
+                        if (pItemActivate->iItem >= 0) {
+                            pThis->m_selectedIndex = pItemActivate->iItem;
+                            InvalidateRect(pThis->m_listView, NULL, TRUE);
+                        }
+                        // Prevent ListView from changing its own selection
+                        ListView_SetItemState(pThis->m_listView, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                        return TRUE;  // Return TRUE to prevent default processing
+                    } else if (pNmhdr->code == LVN_ITEMCHANGING) {
+                        // Block all ListView selection changes
+                        return TRUE;
                     } else if (pNmhdr->code == NM_CUSTOMDRAW) {
                         NMLVCUSTOMDRAW* pCD = reinterpret_cast<NMLVCUSTOMDRAW*>(lParam);
                         if (pCD->nmcd.dwDrawStage == CDDS_PREPAINT) {
