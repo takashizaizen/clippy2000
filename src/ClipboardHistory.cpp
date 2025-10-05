@@ -1,5 +1,6 @@
 #include "ClipboardHistory.h"
 #include <algorithm>
+#include <cctype>
 
 ClipboardHistory::ClipboardHistory(size_t maxEntries)
     : m_maxEntries(maxEntries)
@@ -60,4 +61,33 @@ bool ClipboardHistory::IsDuplicate(const std::wstring& text) const {
         return true;
     }
     return false;
+}
+
+std::vector<ClipboardEntry> ClipboardHistory::Search(const std::wstring& query) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<ClipboardEntry> results;
+
+    if (query.empty()) {
+        return m_entries;
+    }
+
+    // Convert query to lowercase for case-insensitive search
+    std::wstring lowerQuery = query;
+    std::transform(lowerQuery.begin(), lowerQuery.end(), lowerQuery.begin(),
+        [](wchar_t c) { return towlower(c); });
+
+    // Search through entries
+    for (const auto& entry : m_entries) {
+        // Convert entry text to lowercase
+        std::wstring lowerText = entry.text;
+        std::transform(lowerText.begin(), lowerText.end(), lowerText.begin(),
+            [](wchar_t c) { return towlower(c); });
+
+        // Check if query is found in the text
+        if (lowerText.find(lowerQuery) != std::wstring::npos) {
+            results.push_back(entry);
+        }
+    }
+
+    return results;
 }

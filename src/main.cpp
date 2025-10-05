@@ -5,6 +5,7 @@
 #include "ClipboardHistory.h"
 #include "SystemTray.h"
 #include "HotkeyManager.h"
+#include "Storage.h"
 
 // Custom message for system tray
 #define WM_TRAYICON (WM_USER + 1)
@@ -14,6 +15,7 @@ ClipboardMonitor* g_monitor = nullptr;
 ClipboardHistory* g_history = nullptr;
 SystemTray* g_tray = nullptr;
 HotkeyManager* g_hotkeyMgr = nullptr;
+Storage* g_storage = nullptr;
 
 // Function to get clipboard text
 std::wstring GetClipboardText() {
@@ -96,9 +98,25 @@ int main() {
 
     std::cout << "Window created successfully!" << std::endl;
 
+    // Initialize storage
+    Storage storage(L"clippy2000.db");
+    g_storage = &storage;
+
+    if (!storage.Initialize()) {
+        std::cerr << "Failed to initialize storage" << std::endl;
+        return 1;
+    }
+
     // Initialize clipboard history
     ClipboardHistory history(100);
     g_history = &history;
+
+    // Load persisted entries
+    auto savedEntries = storage.LoadEntries(100);
+    std::cout << "Loaded " << savedEntries.size() << " entries from storage" << std::endl;
+    for (const auto& entry : savedEntries) {
+        history.AddEntry(entry.text);
+    }
 
     // Initialize clipboard monitor
     ClipboardMonitor monitor;
@@ -109,11 +127,13 @@ int main() {
         return 1;
     }
 
-    // Set callback to add to history and print
+    // Set callback to add to history, save to storage, and print
     monitor.SetCallback([]() {
         std::wstring clipboardText = GetClipboardText();
         if (!clipboardText.empty()) {
+            ClipboardEntry entry(clipboardText);
             g_history->AddEntry(clipboardText);
+            g_storage->SaveEntry(entry);
             std::wcout << L"[CLIPBOARD CHANGE] Text: " << clipboardText << std::endl;
             std::wcout << L"[HISTORY] Total entries: " << g_history->GetCount() << std::endl;
         } else {
@@ -201,5 +221,6 @@ int main() {
     g_history = nullptr;
     g_tray = nullptr;
     g_hotkeyMgr = nullptr;
+    g_storage = nullptr;
     return 0;
 }
