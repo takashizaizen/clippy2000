@@ -39,7 +39,7 @@ bool Storage::SaveEntry(const ClipboardEntry& entry) {
     // Get timestamp as epoch
     auto epoch = std::chrono::system_clock::to_time_t(entry.timestamp);
 
-    // Simple CSV-like format: timestamp|text
+    // Format: timestamp|type|text
     // Escape newlines and pipe characters in text
     std::wstring escapedText = entry.text;
     size_t pos = 0;
@@ -53,7 +53,7 @@ bool Storage::SaveEntry(const ClipboardEntry& entry) {
         pos += 2;
     }
 
-    file << epoch << L"|" << escapedText << L"\n";
+    file << epoch << L"|" << static_cast<int>(entry.type) << L"|" << escapedText << L"\n";
     file.close();
     return true;
 }
@@ -68,14 +68,38 @@ std::vector<ClipboardEntry> Storage::LoadEntries(size_t limit) {
 
     std::wstring line;
     while (std::getline(file, line) && entries.size() < limit) {
-        size_t pipePos = line.find(L'|');
-        if (pipePos == std::wstring::npos) {
+        // Parse: timestamp|type|text
+        size_t firstPipe = line.find(L'|');
+        if (firstPipe == std::wstring::npos) {
             continue;
         }
 
-        // Parse timestamp
-        std::wstring timestampStr = line.substr(0, pipePos);
-        std::wstring text = line.substr(pipePos + 1);
+        size_t secondPipe = line.find(L'|', firstPipe + 1);
+
+        ClipboardEntry entry;
+        std::wstring timestampStr;
+        std::wstring typeStr;
+        std::wstring text;
+
+        if (secondPipe == std::wstring::npos) {
+            // Old format: timestamp|text (no type)
+            timestampStr = line.substr(0, firstPipe);
+            text = line.substr(firstPipe + 1);
+            entry.type = ClipboardDataType::Text; // Default to text for old entries
+        } else {
+            // New format: timestamp|type|text
+            timestampStr = line.substr(0, firstPipe);
+            typeStr = line.substr(firstPipe + 1, secondPipe - firstPipe - 1);
+            text = line.substr(secondPipe + 1);
+
+            // Parse type
+            try {
+                int typeInt = std::stoi(typeStr);
+                entry.type = static_cast<ClipboardDataType>(typeInt);
+            } catch (...) {
+                entry.type = ClipboardDataType::Text;
+            }
+        }
 
         // Unescape text
         size_t pos = 0;
@@ -89,7 +113,6 @@ std::vector<ClipboardEntry> Storage::LoadEntries(size_t limit) {
             pos += 1;
         }
 
-        ClipboardEntry entry;
         entry.text = text;
 
         // Convert timestamp string to time_point

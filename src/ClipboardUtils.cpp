@@ -113,7 +113,6 @@ bool ClipboardUtils::RestoreEntry(const ClipboardEntry& entry) {
 
 bool ClipboardUtils::RestoreFilesToClipboard(const std::wstring& filePaths) {
     if (!OpenClipboard(nullptr)) {
-        std::wcerr << L"Failed to open clipboard for file restore" << std::endl;
         return false;
     }
 
@@ -138,11 +137,8 @@ bool ClipboardUtils::RestoreFilesToClipboard(const std::wstring& filePaths) {
 
     if (files.empty()) {
         CloseClipboard();
-        std::wcerr << L"No files to restore" << std::endl;
         return false;
     }
-
-    std::wcout << L"Restoring " << files.size() << L" file(s) to clipboard" << std::endl;
 
     // Calculate size needed for DROPFILES structure
     size_t totalSize = sizeof(DROPFILES);

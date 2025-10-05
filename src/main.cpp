@@ -120,7 +120,7 @@ int main() {
     auto savedEntries = storage.LoadEntries(100);
     std::cout << "Loaded " << savedEntries.size() << " entries from storage" << std::endl;
     for (const auto& entry : savedEntries) {
-        history.AddEntry(entry.text);
+        history.AddEntry(entry.text, entry.type);
     }
 
     // Initialize clipboard monitor
@@ -249,10 +249,6 @@ int main() {
         std::cout << "\n[HOTKEY] Ctrl+Shift+F pressed - Search History" << std::endl;
         std::cout << "Enter search term (or press Enter to cancel): " << std::flush;
 
-        // Clear input buffer
-        std::cin.clear();
-        std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
-
         std::string queryStr;
         if (!std::getline(std::cin, queryStr) || queryStr.empty()) {
             std::cout << "Search cancelled" << std::endl;
@@ -278,10 +274,6 @@ int main() {
         std::cout << "\n[HOTKEY] Ctrl+Shift+R pressed - Restore Entry" << std::endl;
         std::cout << "Enter entry number to restore (1-" << g_history->GetCount() << "): " << std::flush;
 
-        // Clear input buffer
-        std::cin.clear();
-        std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
-
         std::string input;
         if (!std::getline(std::cin, input)) {
             std::cout << "Input cancelled" << std::endl;
@@ -302,7 +294,7 @@ int main() {
             g_ignoreNextClipboardChange = true;
 
             if (ClipboardUtils::RestoreEntry(entry)) {
-                std::wcout << L"✓ Restored to clipboard: ";
+                std::cout << "[OK] Restored to clipboard: ";
                 DisplayEntry(entry, index);
             } else {
                 g_ignoreNextClipboardChange = false; // Reset flag on failure
