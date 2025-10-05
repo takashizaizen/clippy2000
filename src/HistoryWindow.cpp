@@ -154,14 +154,22 @@ bool HistoryWindow::Initialize(HINSTANCE hInstance) {
         }
     }
 
-    // Create window without title bar
+    // Calculate centered position
+    int windowWidth = 600;
+    int windowHeight = 400;
+    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int x = (screenWidth - windowWidth) / 2;
+    int y = (screenHeight - windowHeight) / 2;
+
+    // Create window without title bar, centered on screen
     m_hwnd = CreateWindowEx(
         WS_EX_TOPMOST,
         L"Clippy2000HistoryWindow",
         L"Clippy2000 - Clipboard History",
         WS_POPUP | WS_BORDER,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        600, 400,
+        x, y,
+        windowWidth, windowHeight,
         nullptr,
         nullptr,
         hInstance,
