@@ -2,19 +2,14 @@
 #include <shellapi.h>
 #include "ClipboardMonitor.h"
 #include "ClipboardHistory.h"
-#include "SystemTray.h"
 #include "HotkeyManager.h"
 #include "Storage.h"
 #include "ClipboardUtils.h"
 #include "HistoryWindow.h"
 
-// Custom message for system tray
-#define WM_TRAYICON (WM_USER + 1)
-
 // Global pointers for access in window procedure
 ClipboardMonitor* g_monitor = nullptr;
 ClipboardHistory* g_history = nullptr;
-SystemTray* g_tray = nullptr;
 HotkeyManager* g_hotkeyMgr = nullptr;
 Storage* g_storage = nullptr;
 HistoryWindow* g_historyWindow = nullptr;
@@ -28,11 +23,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_CLIPBOARDUPDATE:
             if (g_monitor) {
                 g_monitor->OnClipboardUpdate();
-            }
-            return 0;
-        case WM_TRAYICON:
-            if (g_tray) {
-                g_tray->OnTrayMessage(wParam, lParam);
             }
             return 0;
         case WM_HOTKEY:
@@ -159,41 +149,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Initialize system tray
-    SystemTray tray;
-    g_tray = &tray;
-
-    if (!tray.Initialize(hwnd, WM_TRAYICON)) {
-        MessageBox(NULL, L"Failed to initialize system tray", L"Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-
-    // Set tray menu callback
-    tray.SetMenuCallback([&](UINT menuId) {
-        switch (menuId) {
-            case 1001: // ID_SHOW_HISTORY
-                if (g_historyWindow->IsVisible()) {
-                    g_historyWindow->Hide();
-                } else {
-                    auto entries = g_history->GetEntries();
-                    g_historyWindow->UpdateHistory(entries);
-                    g_historyWindow->Show();
-                }
-                break;
-            case 1002: // ID_CLEAR_HISTORY
-                history.Clear();
-                break;
-            case 1003: // ID_EXIT
-                PostQuitMessage(0);
-                break;
-        }
-    });
-
-    if (!tray.Show()) {
-        MessageBox(NULL, L"Failed to show system tray icon", L"Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-
     // Initialize hotkey manager
     HotkeyManager hotkeyMgr;
     g_hotkeyMgr = &hotkeyMgr;
@@ -220,7 +175,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     });
 
-    // Register Ctrl+Shift+V to show GUI history window
+    // Register Ctrl+Shift+V to toggle GUI history window
     hotkeyMgr.RegisterHotkey(MOD_CONTROL | MOD_SHIFT, 'V', []() {
         if (g_historyWindow->IsVisible()) {
             g_historyWindow->Hide();
@@ -231,6 +186,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     });
 
+    // Show the history window on startup
+    auto entries = history.GetEntries();
+    historyWindow.UpdateHistory(entries);
+    historyWindow.Show();
+
     // Message loop
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -240,7 +200,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     g_monitor = nullptr;
     g_history = nullptr;
-    g_tray = nullptr;
     g_hotkeyMgr = nullptr;
     g_storage = nullptr;
     g_historyWindow = nullptr;

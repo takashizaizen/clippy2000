@@ -5,12 +5,17 @@
 
 #define ID_SEARCH_EDIT 1001
 #define ID_LISTVIEW 1002
+#define ID_QUIT_BUTTON 1003
+#define ID_DIVIDER 1004
 
 HistoryWindow::HistoryWindow()
     : m_hwnd(nullptr)
     , m_searchEdit(nullptr)
     , m_listView(nullptr)
+    , m_quitButton(nullptr)
+    , m_divider(nullptr)
     , m_hInstance(nullptr)
+    , m_boldFont(nullptr)
     , m_isVisible(false)
     , m_restoreCallback(nullptr)
     , m_oldEditProc(nullptr)
@@ -19,6 +24,9 @@ HistoryWindow::HistoryWindow()
 }
 
 HistoryWindow::~HistoryWindow() {
+    if (m_boldFont) {
+        DeleteObject(m_boldFont);
+    }
     if (m_hwnd) {
         DestroyWindow(m_hwnd);
     }
@@ -53,6 +61,8 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             case WM_COMMAND:
                 if (LOWORD(wParam) == ID_SEARCH_EDIT && HIWORD(wParam) == EN_CHANGE) {
                     pThis->OnSearchTextChanged();
+                } else if (LOWORD(wParam) == ID_QUIT_BUTTON && HIWORD(wParam) == STN_CLICKED) {
+                    PostQuitMessage(0);
                 }
                 return 0;
 
@@ -82,6 +92,25 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                     return 0; // Key was handled
                 }
                 break;
+
+            case WM_NCHITTEST: {
+                LRESULT hit = DefWindowProc(hwnd, uMsg, wParam, lParam);
+                if (hit == HTCLIENT && pThis) {
+                    // Get mouse position relative to window
+                    POINT pt;
+                    pt.x = GET_X_LPARAM(lParam);
+                    pt.y = GET_Y_LPARAM(lParam);
+                    ScreenToClient(hwnd, &pt);
+
+                    // Check if mouse is over interactive controls
+                    HWND childUnderMouse = ChildWindowFromPoint(hwnd, pt);
+                    if (childUnderMouse == hwnd || childUnderMouse == pThis->m_divider) {
+                        // Not over any child control, allow dragging
+                        return HTCAPTION;
+                    }
+                }
+                return hit;
+            }
         }
     }
 
@@ -125,12 +154,12 @@ bool HistoryWindow::Initialize(HINSTANCE hInstance) {
         }
     }
 
-    // Create window
+    // Create window without title bar
     m_hwnd = CreateWindowEx(
         WS_EX_TOPMOST,
         L"Clippy2000HistoryWindow",
         L"Clippy2000 - Clipboard History",
-        WS_OVERLAPPEDWINDOW,
+        WS_POPUP | WS_BORDER,
         CW_USEDEFAULT, CW_USEDEFAULT,
         600, 400,
         nullptr,
@@ -172,12 +201,12 @@ void HistoryWindow::CreateControls() {
     // Subclass the edit control to intercept key presses
     m_oldEditProc = (WNDPROC)SetWindowLongPtr(m_searchEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);
 
-    // Create list view
+    // Create list view without column headers
     m_listView = CreateWindowEx(
         0,
         WC_LISTVIEW,
         L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_BORDER,
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOCOLUMNHEADER | WS_BORDER,
         10, 45, 560, 300,
         m_hwnd,
         (HMENU)ID_LISTVIEW,
@@ -185,24 +214,57 @@ void HistoryWindow::CreateControls() {
         nullptr
     );
 
-    // Set up list view columns
+    // Set up list view columns (still needed for layout, but headers won't show)
     LVCOLUMN lvc;
-    lvc.mask = LVCF_TEXT | LVCF_WIDTH;
+    lvc.mask = LVCF_WIDTH;
 
-    lvc.pszText = (LPWSTR)L"#";
     lvc.cx = 40;
     ListView_InsertColumn(m_listView, 0, &lvc);
 
-    lvc.pszText = (LPWSTR)L"Type";
     lvc.cx = 60;
     ListView_InsertColumn(m_listView, 1, &lvc);
 
-    lvc.pszText = (LPWSTR)L"Content";
     lvc.cx = 440;
     ListView_InsertColumn(m_listView, 2, &lvc);
 
     // Enable full row select
     ListView_SetExtendedListViewStyle(m_listView, LVS_EX_FULLROWSELECT);
+
+    // Create horizontal divider line
+    m_divider = CreateWindowEx(
+        0,
+        L"STATIC",
+        L"",
+        WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+        10, 350, 560, 2,
+        m_hwnd,
+        (HMENU)ID_DIVIDER,
+        m_hInstance,
+        nullptr
+    );
+
+    // Create bold font for quit text
+    m_boldFont = CreateFont(
+        16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI"
+    );
+
+    // Create quit text (styled as a clickable label)
+    m_quitButton = CreateWindowEx(
+        0,
+        L"STATIC",
+        L"Quit Application",
+        WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOTIFY,
+        10, 360, 560, 25,
+        m_hwnd,
+        (HMENU)ID_QUIT_BUTTON,
+        m_hInstance,
+        nullptr
+    );
+
+    // Apply bold font to quit text
+    SendMessage(m_quitButton, WM_SETFONT, (WPARAM)m_boldFont, TRUE);
 }
 
 void HistoryWindow::Show() {
@@ -240,7 +302,13 @@ void HistoryWindow::OnSize(int width, int height) {
         SetWindowPos(m_searchEdit, nullptr, 10, 10, width - 20, 25, SWP_NOZORDER);
     }
     if (m_listView) {
-        SetWindowPos(m_listView, nullptr, 10, 45, width - 20, height - 65, SWP_NOZORDER);
+        SetWindowPos(m_listView, nullptr, 10, 45, width - 20, height - 100, SWP_NOZORDER);
+    }
+    if (m_divider) {
+        SetWindowPos(m_divider, nullptr, 10, height - 50, width - 20, 2, SWP_NOZORDER);
+    }
+    if (m_quitButton) {
+        SetWindowPos(m_quitButton, nullptr, 10, height - 40, width - 20, 25, SWP_NOZORDER);
     }
 }
 

@@ -35,7 +35,10 @@ private:
     HWND m_hwnd;
     HWND m_searchEdit;
     HWND m_listView;
+    HWND m_quitButton;
+    HWND m_divider;
     HINSTANCE m_hInstance;
+    HFONT m_boldFont;
     bool m_isVisible;
     RestoreCallback m_restoreCallback;
     std::vector<ClipboardEntry> m_allEntries;
