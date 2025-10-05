@@ -1,0 +1,393 @@
+#include "HistoryWindow.h"
+#include <windowsx.h>
+#include <sstream>
+#include <algorithm>
+
+#define ID_SEARCH_EDIT 1001
+#define ID_LISTVIEW 1002
+
+HistoryWindow::HistoryWindow()
+    : m_hwnd(nullptr)
+    , m_searchEdit(nullptr)
+    , m_listView(nullptr)
+    , m_hInstance(nullptr)
+    , m_isVisible(false)
+    , m_restoreCallback(nullptr)
+    , m_oldEditProc(nullptr)
+{
+}
+
+HistoryWindow::~HistoryWindow() {
+    if (m_hwnd) {
+        DestroyWindow(m_hwnd);
+    }
+}
+
+LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    HistoryWindow* pThis = nullptr;
+
+    if (uMsg == WM_NCCREATE) {
+        CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
+        pThis = reinterpret_cast<HistoryWindow*>(pCreate->lpCreateParams);
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pThis));
+        pThis->m_hwnd = hwnd;
+    } else {
+        pThis = reinterpret_cast<HistoryWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+    }
+
+    if (pThis) {
+        switch (uMsg) {
+            case WM_CREATE:
+                pThis->OnCreate();
+                return 0;
+
+            case WM_CLOSE:
+                pThis->OnClose();
+                return 0;
+
+            case WM_SIZE:
+                pThis->OnSize(LOWORD(lParam), HIWORD(lParam));
+                return 0;
+
+            case WM_COMMAND:
+                if (LOWORD(wParam) == ID_SEARCH_EDIT && HIWORD(wParam) == EN_CHANGE) {
+                    pThis->OnSearchTextChanged();
+                }
+                return 0;
+
+            case WM_NOTIFY: {
+                NMHDR* pNmhdr = reinterpret_cast<NMHDR*>(lParam);
+                if (pNmhdr->idFrom == ID_LISTVIEW && pNmhdr->code == NM_DBLCLK) {
+                    pThis->OnListDoubleClick();
+                }
+                return 0;
+            }
+
+            case WM_KEYDOWN:
+                if (pThis->OnKeyDown(wParam)) {
+                    return 0; // Key was handled
+                }
+                break;
+        }
+    }
+
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK HistoryWindow::EditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    HistoryWindow* pThis = reinterpret_cast<HistoryWindow*>(GetWindowLongPtr(GetParent(hwnd), GWLP_USERDATA));
+
+    if (pThis && uMsg == WM_KEYDOWN) {
+        // Handle Ctrl+number and ESC
+        if (pThis->OnKeyDown(wParam)) {
+            return 0; // Key was handled
+        }
+    }
+
+    // Call original edit control procedure
+    if (pThis && pThis->m_oldEditProc) {
+        return CallWindowProc(pThis->m_oldEditProc, hwnd, uMsg, wParam, lParam);
+    }
+
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+bool HistoryWindow::Initialize(HINSTANCE hInstance) {
+    m_hInstance = hInstance;
+
+    // Register window class
+    WNDCLASSEX wc = {0};
+    wc.cbSize = sizeof(WNDCLASSEX);
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"Clippy2000HistoryWindow";
+
+    if (!RegisterClassEx(&wc)) {
+        // Class might already be registered
+        if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            return false;
+        }
+    }
+
+    // Create window
+    m_hwnd = CreateWindowEx(
+        WS_EX_TOPMOST,
+        L"Clippy2000HistoryWindow",
+        L"Clippy2000 - Clipboard History",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        600, 400,
+        nullptr,
+        nullptr,
+        hInstance,
+        this
+    );
+
+    return m_hwnd != nullptr;
+}
+
+void HistoryWindow::OnCreate() {
+    CreateControls();
+}
+
+void HistoryWindow::CreateControls() {
+    // Initialize common controls
+    INITCOMMONCONTROLSEX icex;
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_LISTVIEW_CLASSES;
+    InitCommonControlsEx(&icex);
+
+    // Create search edit box
+    m_searchEdit = CreateWindowEx(
+        WS_EX_CLIENTEDGE,
+        L"EDIT",
+        L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        10, 10, 560, 25,
+        m_hwnd,
+        (HMENU)ID_SEARCH_EDIT,
+        m_hInstance,
+        nullptr
+    );
+
+    // Set placeholder text
+    SendMessage(m_searchEdit, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search clipboard history...");
+
+    // Subclass the edit control to intercept key presses
+    m_oldEditProc = (WNDPROC)SetWindowLongPtr(m_searchEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);
+
+    // Create list view
+    m_listView = CreateWindowEx(
+        0,
+        WC_LISTVIEW,
+        L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_BORDER,
+        10, 45, 560, 300,
+        m_hwnd,
+        (HMENU)ID_LISTVIEW,
+        m_hInstance,
+        nullptr
+    );
+
+    // Set up list view columns
+    LVCOLUMN lvc;
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH;
+
+    lvc.pszText = (LPWSTR)L"#";
+    lvc.cx = 40;
+    ListView_InsertColumn(m_listView, 0, &lvc);
+
+    lvc.pszText = (LPWSTR)L"Type";
+    lvc.cx = 60;
+    ListView_InsertColumn(m_listView, 1, &lvc);
+
+    lvc.pszText = (LPWSTR)L"Content";
+    lvc.cx = 440;
+    ListView_InsertColumn(m_listView, 2, &lvc);
+
+    // Enable full row select
+    ListView_SetExtendedListViewStyle(m_listView, LVS_EX_FULLROWSELECT);
+}
+
+void HistoryWindow::Show() {
+    if (m_hwnd) {
+        // Clear search filter and display all entries
+        SetWindowText(m_searchEdit, L"");
+        m_currentFilter = L"";
+        FilterAndDisplay(m_currentFilter);
+
+        ShowWindow(m_hwnd, SW_SHOW);
+        SetForegroundWindow(m_hwnd);
+        SetFocus(m_searchEdit);
+        m_isVisible = true;
+    }
+}
+
+void HistoryWindow::Hide() {
+    if (m_hwnd) {
+        ShowWindow(m_hwnd, SW_HIDE);
+        m_isVisible = false;
+    }
+}
+
+bool HistoryWindow::IsVisible() const {
+    return m_isVisible;
+}
+
+void HistoryWindow::OnClose() {
+    Hide();
+}
+
+void HistoryWindow::OnSize(int width, int height) {
+    if (m_searchEdit) {
+        SetWindowPos(m_searchEdit, nullptr, 10, 10, width - 20, 25, SWP_NOZORDER);
+    }
+    if (m_listView) {
+        SetWindowPos(m_listView, nullptr, 10, 45, width - 20, height - 65, SWP_NOZORDER);
+    }
+}
+
+void HistoryWindow::UpdateHistory(const std::vector<ClipboardEntry>& entries) {
+    m_allEntries = entries;
+
+    // Get current search text
+    wchar_t searchText[256] = {0};
+    GetWindowText(m_searchEdit, searchText, 256);
+    m_currentFilter = searchText;
+
+    FilterAndDisplay(m_currentFilter);
+}
+
+void HistoryWindow::RefreshIfVisible(const std::vector<ClipboardEntry>& entries) {
+    if (m_isVisible) {
+        UpdateHistory(entries);
+    } else {
+        // Just update the entries without refreshing display
+        m_allEntries = entries;
+    }
+}
+
+void HistoryWindow::OnSearchTextChanged() {
+    wchar_t searchText[256] = {0};
+    GetWindowText(m_searchEdit, searchText, 256);
+    m_currentFilter = searchText;
+
+    FilterAndDisplay(m_currentFilter);
+}
+
+void HistoryWindow::FilterAndDisplay(const std::wstring& filter) {
+    ListView_DeleteAllItems(m_listView);
+
+    std::wstring lowerFilter = filter;
+    std::transform(lowerFilter.begin(), lowerFilter.end(), lowerFilter.begin(), towlower);
+
+    int displayIndex = 1;
+    const int maxItems = 10; // Limit to 10 items
+
+    for (size_t i = 0; i < m_allEntries.size() && displayIndex <= maxItems; i++) {
+        const auto& entry = m_allEntries[i];
+
+        // Filter by search text
+        if (!lowerFilter.empty()) {
+            std::wstring lowerText = entry.text;
+            std::transform(lowerText.begin(), lowerText.end(), lowerText.begin(), towlower);
+
+            if (lowerText.find(lowerFilter) == std::wstring::npos) {
+                continue; // Skip entries that don't match
+            }
+        }
+
+        // Add item to list view
+        LVITEM lvi = {0};
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
+        lvi.iItem = displayIndex - 1;
+        lvi.lParam = i; // Store original index
+
+        // Column 0: Index (1-9, 0 for 10th item)
+        wchar_t indexStr[16];
+        wsprintf(indexStr, L"%d", displayIndex % 10);
+        lvi.pszText = indexStr;
+        ListView_InsertItem(m_listView, &lvi);
+
+        // Column 1: Type
+        const wchar_t* typeStr = L"TEXT";
+        if (entry.type == ClipboardDataType::Files) typeStr = L"FILES";
+        else if (entry.type == ClipboardDataType::Image) typeStr = L"IMAGE";
+        ListView_SetItemText(m_listView, displayIndex - 1, 1, (LPWSTR)typeStr);
+
+        // Column 2: Content
+        std::wstring content = entry.text;
+        if (content.length() > 80) {
+            content = content.substr(0, 80) + L"...";
+        }
+        // Replace newlines with spaces
+        std::replace(content.begin(), content.end(), L'\n', L' ');
+        std::replace(content.begin(), content.end(), L'\r', L' ');
+
+        ListView_SetItemText(m_listView, displayIndex - 1, 2, (LPWSTR)content.c_str());
+
+        displayIndex++;
+    }
+}
+
+void HistoryWindow::OnListDoubleClick() {
+    int selectedItem = ListView_GetNextItem(m_listView, -1, LVNI_SELECTED);
+    if (selectedItem != -1) {
+        LVITEM lvi = {0};
+        lvi.mask = LVIF_PARAM;
+        lvi.iItem = selectedItem;
+        ListView_GetItem(m_listView, &lvi);
+
+        int originalIndex = (int)lvi.lParam;
+        if (originalIndex >= 0 && originalIndex < (int)m_allEntries.size()) {
+            if (m_restoreCallback) {
+                m_restoreCallback(m_allEntries[originalIndex]);
+            }
+            Hide();
+        }
+    }
+}
+
+bool HistoryWindow::OnKeyDown(WPARAM key) {
+    if (key == VK_ESCAPE) {
+        Hide();
+        return true;
+    }
+
+    // Check for Ctrl+1 through Ctrl+0
+    if (GetKeyState(VK_CONTROL) & 0x8000) {
+        int itemIndex = -1;
+
+        // Ctrl+1 = item 0, Ctrl+2 = item 1, ..., Ctrl+0 = item 9
+        if (key >= '1' && key <= '9') {
+            itemIndex = key - '1'; // 1->0, 2->1, ..., 9->8
+        } else if (key == '0') {
+            itemIndex = 9; // 0 = 10th item
+        }
+
+        if (itemIndex != -1 && itemIndex < ListView_GetItemCount(m_listView)) {
+            // Get the original entry index from the list item
+            LVITEM lvi = {0};
+            lvi.mask = LVIF_PARAM;
+            lvi.iItem = itemIndex;
+            ListView_GetItem(m_listView, &lvi);
+
+            int originalIndex = (int)lvi.lParam;
+            if (originalIndex >= 0 && originalIndex < (int)m_allEntries.size()) {
+                if (m_restoreCallback) {
+                    m_restoreCallback(m_allEntries[originalIndex]);
+                }
+                Hide();
+                return true;
+            }
+        }
+    }
+
+    return false; // Key not handled
+}
+
+void HistoryWindow::SetRestoreCallback(RestoreCallback callback) {
+    m_restoreCallback = callback;
+}
+
+std::wstring HistoryWindow::GetEntryDisplayText(const ClipboardEntry& entry, int index) {
+    std::wostringstream oss;
+    oss << index << L". ";
+
+    switch (entry.type) {
+        case ClipboardDataType::Text:
+            oss << L"[TEXT] " << entry.text.substr(0, 60);
+            if (entry.text.length() > 60) oss << L"...";
+            break;
+        case ClipboardDataType::Files:
+            oss << L"[FILES] " << entry.text;
+            break;
+        case ClipboardDataType::Image:
+            oss << L"[IMAGE]";
+            break;
+    }
+
+    return oss.str();
+}
