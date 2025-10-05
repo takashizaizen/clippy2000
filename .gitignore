@@ -35,3 +35,4 @@ Makefile
 *.suo
 *.opensdf
 *.sdf
+*.db
