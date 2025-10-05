@@ -6,6 +6,9 @@
 #include "Storage.h"
 #include "ClipboardUtils.h"
 #include "HistoryWindow.h"
+#include "SystemTray.h"
+
+#define WM_TRAYICON (WM_USER + 1)
 
 // Global pointers for access in window procedure
 ClipboardMonitor* g_monitor = nullptr;
@@ -13,6 +16,7 @@ ClipboardHistory* g_history = nullptr;
 HotkeyManager* g_hotkeyMgr = nullptr;
 Storage* g_storage = nullptr;
 HistoryWindow* g_historyWindow = nullptr;
+SystemTray* g_systemTray = nullptr;
 
 // Flag to ignore clipboard changes we caused ourselves
 bool g_ignoreNextClipboardChange = false;
@@ -28,6 +32,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_HOTKEY:
             if (g_hotkeyMgr) {
                 g_hotkeyMgr->OnHotkey(static_cast<int>(wParam));
+            }
+            return 0;
+        case WM_TRAYICON:
+            if (g_systemTray) {
+                g_systemTray->OnTrayMessage(wParam, lParam);
             }
             return 0;
         case WM_DESTROY:
@@ -186,6 +195,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     });
 
+    // Initialize system tray
+    SystemTray systemTray;
+    g_systemTray = &systemTray;
+
+    if (!systemTray.Initialize(hwnd, WM_TRAYICON)) {
+        MessageBox(NULL, L"Failed to initialize system tray", L"Error", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+
+    // Set system tray menu callback
+    systemTray.SetMenuCallback([](UINT menuId) {
+        switch (menuId) {
+            case 1001: // ID_SHOW_HISTORY
+                if (g_historyWindow->IsVisible()) {
+                    g_historyWindow->Hide();
+                } else {
+                    auto entries = g_history->GetEntries();
+                    g_historyWindow->UpdateHistory(entries);
+                    g_historyWindow->Show();
+                }
+                break;
+            case 1002: // ID_CLEAR_HISTORY
+                g_history->Clear();
+                g_storage->ClearAll();
+                if (g_historyWindow->IsVisible()) {
+                    g_historyWindow->UpdateHistory({});
+                }
+                break;
+            case 1003: // ID_EXIT
+                PostQuitMessage(0);
+                break;
+        }
+    });
+
+    systemTray.Show();
+
     // Show the history window on startup
     auto entries = history.GetEntries();
     historyWindow.UpdateHistory(entries);
@@ -203,5 +248,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_hotkeyMgr = nullptr;
     g_storage = nullptr;
     g_historyWindow = nullptr;
+    g_systemTray = nullptr;
     return 0;
 }

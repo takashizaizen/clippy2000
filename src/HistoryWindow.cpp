@@ -19,6 +19,7 @@ HistoryWindow::HistoryWindow()
     , m_isVisible(false)
     , m_restoreCallback(nullptr)
     , m_oldEditProc(nullptr)
+    , m_oldListViewProc(nullptr)
     , m_selectedIndex(0)
 {
 }
@@ -70,6 +71,11 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                 NMHDR* pNmhdr = reinterpret_cast<NMHDR*>(lParam);
                 if (pNmhdr->idFrom == ID_LISTVIEW) {
                     if (pNmhdr->code == NM_DBLCLK) {
+                        // Get which item was double-clicked
+                        NMITEMACTIVATE* pItemActivate = reinterpret_cast<NMITEMACTIVATE*>(lParam);
+                        if (pItemActivate->iItem >= 0) {
+                            pThis->m_selectedIndex = pItemActivate->iItem;
+                        }
                         pThis->OnListDoubleClick();
                     } else if (pNmhdr->code == NM_CLICK || pNmhdr->code == NM_RCLICK) {
                         // Get which item was clicked
@@ -134,7 +140,15 @@ LRESULT CALLBACK HistoryWindow::EditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wP
     HistoryWindow* pThis = reinterpret_cast<HistoryWindow*>(GetWindowLongPtr(GetParent(hwnd), GWLP_USERDATA));
 
     if (pThis && uMsg == WM_KEYDOWN) {
-        // Handle Ctrl+number and ESC
+        // Check for Shift+Up/Down before other keys
+        if (GetKeyState(VK_SHIFT) & 0x8000) {
+            if (wParam == VK_UP || wParam == VK_DOWN) {
+                if (pThis->OnKeyDown(wParam)) {
+                    return 0; // Key was handled
+                }
+            }
+        }
+        // Handle other keys (Ctrl+number, ESC, Enter)
         if (pThis->OnKeyDown(wParam)) {
             return 0; // Key was handled
         }
@@ -143,6 +157,24 @@ LRESULT CALLBACK HistoryWindow::EditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wP
     // Call original edit control procedure
     if (pThis && pThis->m_oldEditProc) {
         return CallWindowProc(pThis->m_oldEditProc, hwnd, uMsg, wParam, lParam);
+    }
+
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK HistoryWindow::ListViewSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    HistoryWindow* pThis = reinterpret_cast<HistoryWindow*>(GetWindowLongPtr(GetParent(hwnd), GWLP_USERDATA));
+
+    if (pThis && uMsg == WM_KEYDOWN) {
+        // Handle all keyboard navigation
+        if (pThis->OnKeyDown(wParam)) {
+            return 0; // Key was handled
+        }
+    }
+
+    // Call original ListView procedure
+    if (pThis && pThis->m_oldListViewProc) {
+        return CallWindowProc(pThis->m_oldListViewProc, hwnd, uMsg, wParam, lParam);
     }
 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -250,6 +282,9 @@ void HistoryWindow::CreateControls() {
 
     // Enable full row select
     ListView_SetExtendedListViewStyle(m_listView, LVS_EX_FULLROWSELECT);
+
+    // Subclass the ListView to intercept key presses
+    m_oldListViewProc = (WNDPROC)SetWindowLongPtr(m_listView, GWLP_WNDPROC, (LONG_PTR)ListViewSubclassProc);
 
     // Create horizontal divider line
     m_divider = CreateWindowEx(
@@ -418,11 +453,11 @@ void HistoryWindow::FilterAndDisplay(const std::wstring& filter) {
 }
 
 void HistoryWindow::OnListDoubleClick() {
-    int selectedItem = ListView_GetNextItem(m_listView, -1, LVNI_SELECTED);
-    if (selectedItem != -1) {
+    int itemCount = ListView_GetItemCount(m_listView);
+    if (m_selectedIndex >= 0 && m_selectedIndex < itemCount) {
         LVITEM lvi = {0};
         lvi.mask = LVIF_PARAM;
-        lvi.iItem = selectedItem;
+        lvi.iItem = m_selectedIndex;
         ListView_GetItem(m_listView, &lvi);
 
         int originalIndex = (int)lvi.lParam;

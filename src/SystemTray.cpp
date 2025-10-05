@@ -1,5 +1,4 @@
 #include "SystemTray.h"
-#include <iostream>
 
 SystemTray::SystemTray()
     : m_hwnd(nullptr)
@@ -39,11 +38,9 @@ bool SystemTray::Show() {
 
     if (Shell_NotifyIcon(NIM_ADD, &m_nid)) {
         m_isVisible = true;
-        std::cout << "System tray icon added" << std::endl;
         return true;
     }
 
-    std::cerr << "Failed to add system tray icon. Error: " << GetLastError() << std::endl;
     return false;
 }
 
@@ -54,7 +51,6 @@ bool SystemTray::Hide() {
 
     if (Shell_NotifyIcon(NIM_DELETE, &m_nid)) {
         m_isVisible = false;
-        std::cout << "System tray icon removed" << std::endl;
         return true;
     }
 
