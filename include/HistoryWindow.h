@@ -39,6 +39,7 @@ private:
     HWND m_divider;
     HINSTANCE m_hInstance;
     HFONT m_boldFont;
+    HBRUSH m_bgBrush;
     bool m_isVisible;
     RestoreCallback m_restoreCallback;
     std::vector<ClipboardEntry> m_allEntries;

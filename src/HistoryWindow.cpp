@@ -16,6 +16,7 @@ HistoryWindow::HistoryWindow()
     , m_divider(nullptr)
     , m_hInstance(nullptr)
     , m_boldFont(nullptr)
+    , m_bgBrush(nullptr)
     , m_isVisible(false)
     , m_restoreCallback(nullptr)
     , m_oldEditProc(nullptr)
@@ -27,6 +28,9 @@ HistoryWindow::HistoryWindow()
 HistoryWindow::~HistoryWindow() {
     if (m_boldFont) {
         DeleteObject(m_boldFont);
+    }
+    if (m_bgBrush) {
+        DeleteObject(m_bgBrush);
     }
     if (m_hwnd) {
         DestroyWindow(m_hwnd);
@@ -96,8 +100,11 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                             return CDRF_NOTIFYITEMDRAW;
                         } else if (pCD->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
                             if ((int)pCD->nmcd.dwItemSpec == pThis->m_selectedIndex) {
-                                pCD->clrTextBk = RGB(100, 150, 255);  // Light blue background
-                                pCD->clrText = RGB(255, 255, 255);    // White text
+                                pCD->clrTextBk = RGB(100, 150, 255);  // Light blue background for selection
+                                pCD->clrText = RGB(255, 255, 255);    // White text for selection
+                            } else {
+                                pCD->clrTextBk = RGB(255, 229, 217);  // Peach background for non-selected
+                                pCD->clrText = RGB(0, 0, 0);          // Black text for non-selected
                             }
                             return CDRF_NEWFONT;
                         }
@@ -111,6 +118,29 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                     return 0; // Key was handled
                 }
                 break;
+
+            case WM_CTLCOLOREDIT: {
+                // Set search field background to lighter peach
+                if (pThis) {
+                    HDC hdcEdit = (HDC)wParam;
+                    SetBkColor(hdcEdit, RGB(255, 242, 235));  // Lighter peach background
+                    SetTextColor(hdcEdit, RGB(0, 0, 0));      // Black text
+                    static HBRUSH hbrLightPeach = CreateSolidBrush(RGB(255, 242, 235));
+                    return (LRESULT)hbrLightPeach;
+                }
+                break;
+            }
+
+            case WM_CTLCOLORSTATIC: {
+                // Set quit button background to match window background
+                if (pThis && (HWND)lParam == pThis->m_quitButton) {
+                    HDC hdcStatic = (HDC)wParam;
+                    SetBkColor(hdcStatic, RGB(255, 229, 217));  // Peach background
+                    SetTextColor(hdcStatic, RGB(0, 0, 0));      // Black text
+                    return (LRESULT)pThis->m_bgBrush;
+                }
+                break;
+            }
 
             case WM_NCHITTEST: {
                 LRESULT hit = DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -183,13 +213,16 @@ LRESULT CALLBACK HistoryWindow::ListViewSubclassProc(HWND hwnd, UINT uMsg, WPARA
 bool HistoryWindow::Initialize(HINSTANCE hInstance) {
     m_hInstance = hInstance;
 
+    // Create peach background brush
+    m_bgBrush = CreateSolidBrush(RGB(255, 229, 217));
+
     // Register window class
     WNDCLASSEX wc = {0};
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = m_bgBrush;
     wc.lpszClassName = L"Clippy2000HistoryWindow";
 
     if (!RegisterClassEx(&wc)) {
@@ -254,12 +287,12 @@ void HistoryWindow::CreateControls() {
     // Subclass the edit control to intercept key presses
     m_oldEditProc = (WNDPROC)SetWindowLongPtr(m_searchEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);
 
-    // Create list view without column headers
+    // Create list view without column headers and border
     m_listView = CreateWindowEx(
         0,
         WC_LISTVIEW,
         L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOCOLUMNHEADER | WS_BORDER,
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOCOLUMNHEADER,
         10, 45, 560, 300,
         m_hwnd,
         (HMENU)ID_LISTVIEW,
@@ -286,6 +319,10 @@ void HistoryWindow::CreateControls() {
     // Subclass the ListView to intercept key presses
     m_oldListViewProc = (WNDPROC)SetWindowLongPtr(m_listView, GWLP_WNDPROC, (LONG_PTR)ListViewSubclassProc);
 
+    // Set pastel peach background color for ListView
+    ListView_SetBkColor(m_listView, RGB(255, 229, 217));  // Soft peach/pastel color
+    ListView_SetTextBkColor(m_listView, RGB(255, 229, 217));
+
     // Create horizontal divider line
     m_divider = CreateWindowEx(
         0,
@@ -306,12 +343,12 @@ void HistoryWindow::CreateControls() {
         DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI"
     );
 
-    // Create quit text (styled as a clickable label)
+    // Create quit text (styled as a clickable label, left-aligned)
     m_quitButton = CreateWindowEx(
         0,
         L"STATIC",
         L"Quit Application",
-        WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOTIFY,
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY,
         10, 360, 560, 25,
         m_hwnd,
         (HMENU)ID_QUIT_BUTTON,
