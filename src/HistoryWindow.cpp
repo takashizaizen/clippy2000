@@ -344,12 +344,13 @@ void HistoryWindow::CreateControls() {
     );
 
     // Create quit text (styled as a clickable label, left-aligned)
+    // First create the button with temporary width
     m_quitButton = CreateWindowEx(
         0,
         L"STATIC",
         L"Quit Application",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY,
-        10, 360, 560, 25,
+        10, 360, 200, 25,
         m_hwnd,
         (HMENU)ID_QUIT_BUTTON,
         m_hInstance,
@@ -358,6 +359,17 @@ void HistoryWindow::CreateControls() {
 
     // Apply bold font to quit text
     SendMessage(m_quitButton, WM_SETFONT, (WPARAM)m_boldFont, TRUE);
+
+    // Now calculate text width with the correct font and resize
+    HDC hdc = GetDC(m_quitButton);
+    SIZE textSize;
+    HFONT oldFont = (HFONT)SelectObject(hdc, m_boldFont);
+    GetTextExtentPoint32(hdc, L"Quit Application", 16, &textSize);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(m_quitButton, hdc);
+
+    int quitWidth = textSize.cx + 20; // Text width + padding for touch area
+    SetWindowPos(m_quitButton, nullptr, 0, 0, quitWidth, 25, SWP_NOMOVE | SWP_NOZORDER);
 }
 
 void HistoryWindow::Show() {
@@ -401,7 +413,8 @@ void HistoryWindow::OnSize(int width, int height) {
         SetWindowPos(m_divider, nullptr, 10, height - 50, width - 20, 2, SWP_NOZORDER);
     }
     if (m_quitButton) {
-        SetWindowPos(m_quitButton, nullptr, 10, height - 40, width - 20, 25, SWP_NOZORDER);
+        // Keep the quit button's width, only update position
+        SetWindowPos(m_quitButton, nullptr, 10, height - 40, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
     }
 }
 
@@ -487,6 +500,38 @@ void HistoryWindow::FilterAndDisplay(const std::wstring& filter) {
 
         displayIndex++;
     }
+
+    // Resize ListView based on number of items
+    int itemCount = displayIndex - 1;
+    int itemHeight = 20; // Approximate height per item
+    int minHeight = itemHeight * 2; // Minimum height for 2 items
+    int listHeight = itemCount * itemHeight;
+
+    if (listHeight < minHeight) {
+        listHeight = minHeight; // Minimum height even when empty
+    }
+
+    // Reposition controls based on new ListView height
+    RECT rcWindow;
+    GetClientRect(m_hwnd, &rcWindow);
+    int windowWidth = rcWindow.right - rcWindow.left;
+
+    // Update ListView size
+    SetWindowPos(m_listView, nullptr, 10, 45, windowWidth - 20, listHeight, SWP_NOZORDER);
+
+    // Update divider position
+    int dividerY = 45 + listHeight + 5;
+    SetWindowPos(m_divider, nullptr, 10, dividerY, windowWidth - 20, 2, SWP_NOZORDER);
+
+    // Update quit button position (Y only, keep original width)
+    int quitY = dividerY + 10;
+    SetWindowPos(m_quitButton, nullptr, 10, quitY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+
+    // Resize window to fit content
+    int newWindowHeight = quitY + 35;
+    RECT rcCurrentWindow;
+    GetWindowRect(m_hwnd, &rcCurrentWindow);
+    SetWindowPos(m_hwnd, nullptr, 0, 0, 600, newWindowHeight, SWP_NOMOVE | SWP_NOZORDER);
 }
 
 void HistoryWindow::OnListDoubleClick() {
