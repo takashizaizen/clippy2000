@@ -14,6 +14,7 @@ HistoryWindow::HistoryWindow()
     , m_isVisible(false)
     , m_restoreCallback(nullptr)
     , m_oldEditProc(nullptr)
+    , m_selectedIndex(0)
 {
 }
 
@@ -57,8 +58,21 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 
             case WM_NOTIFY: {
                 NMHDR* pNmhdr = reinterpret_cast<NMHDR*>(lParam);
-                if (pNmhdr->idFrom == ID_LISTVIEW && pNmhdr->code == NM_DBLCLK) {
-                    pThis->OnListDoubleClick();
+                if (pNmhdr->idFrom == ID_LISTVIEW) {
+                    if (pNmhdr->code == NM_DBLCLK) {
+                        pThis->OnListDoubleClick();
+                    } else if (pNmhdr->code == NM_CUSTOMDRAW) {
+                        NMLVCUSTOMDRAW* pCD = reinterpret_cast<NMLVCUSTOMDRAW*>(lParam);
+                        if (pCD->nmcd.dwDrawStage == CDDS_PREPAINT) {
+                            return CDRF_NOTIFYITEMDRAW;
+                        } else if (pCD->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
+                            if ((int)pCD->nmcd.dwItemSpec == pThis->m_selectedIndex) {
+                                pCD->clrTextBk = RGB(100, 150, 255);  // Light blue background
+                                pCD->clrText = RGB(255, 255, 255);    // White text
+                            }
+                            return CDRF_NEWFONT;
+                        }
+                    }
                 }
                 return 0;
             }
@@ -196,6 +210,7 @@ void HistoryWindow::Show() {
         // Clear search filter and display all entries
         SetWindowText(m_searchEdit, L"");
         m_currentFilter = L"";
+        m_selectedIndex = 0;
         FilterAndDisplay(m_currentFilter);
 
         ShowWindow(m_hwnd, SW_SHOW);
@@ -254,6 +269,7 @@ void HistoryWindow::OnSearchTextChanged() {
     GetWindowText(m_searchEdit, searchText, 256);
     m_currentFilter = searchText;
 
+    m_selectedIndex = 0; // Reset selection when filter changes
     FilterAndDisplay(m_currentFilter);
 }
 
@@ -336,6 +352,27 @@ bool HistoryWindow::OnKeyDown(WPARAM key) {
         return true;
     }
 
+    // Check for Shift+Up/Down for navigation
+    if (GetKeyState(VK_SHIFT) & 0x8000) {
+        if (key == VK_DOWN) {
+            int itemCount = ListView_GetItemCount(m_listView);
+            if (itemCount > 0) {
+                m_selectedIndex = (m_selectedIndex + 1) % itemCount;
+                InvalidateRect(m_listView, NULL, TRUE);
+                ListView_EnsureVisible(m_listView, m_selectedIndex, FALSE);
+            }
+            return true;
+        } else if (key == VK_UP) {
+            int itemCount = ListView_GetItemCount(m_listView);
+            if (itemCount > 0) {
+                m_selectedIndex = (m_selectedIndex - 1 + itemCount) % itemCount;
+                InvalidateRect(m_listView, NULL, TRUE);
+                ListView_EnsureVisible(m_listView, m_selectedIndex, FALSE);
+            }
+            return true;
+        }
+    }
+
     // Check for Ctrl+1 through Ctrl+0
     if (GetKeyState(VK_CONTROL) & 0x8000) {
         int itemIndex = -1;
@@ -352,6 +389,26 @@ bool HistoryWindow::OnKeyDown(WPARAM key) {
             LVITEM lvi = {0};
             lvi.mask = LVIF_PARAM;
             lvi.iItem = itemIndex;
+            ListView_GetItem(m_listView, &lvi);
+
+            int originalIndex = (int)lvi.lParam;
+            if (originalIndex >= 0 && originalIndex < (int)m_allEntries.size()) {
+                if (m_restoreCallback) {
+                    m_restoreCallback(m_allEntries[originalIndex]);
+                }
+                Hide();
+                return true;
+            }
+        }
+    }
+
+    // Check for Enter to select highlighted item
+    if (key == VK_RETURN) {
+        int itemCount = ListView_GetItemCount(m_listView);
+        if (m_selectedIndex >= 0 && m_selectedIndex < itemCount) {
+            LVITEM lvi = {0};
+            lvi.mask = LVIF_PARAM;
+            lvi.iItem = m_selectedIndex;
             ListView_GetItem(m_listView, &lvi);
 
             int originalIndex = (int)lvi.lParam;

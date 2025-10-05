@@ -41,6 +41,7 @@ private:
     std::vector<ClipboardEntry> m_allEntries;
     std::wstring m_currentFilter;
     WNDPROC m_oldEditProc;
+    int m_selectedIndex;
 
     // Window procedure
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
