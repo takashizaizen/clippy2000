@@ -97,45 +97,16 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                     } else if (pNmhdr->code == NM_CUSTOMDRAW) {
                         NMLVCUSTOMDRAW* pCD = reinterpret_cast<NMLVCUSTOMDRAW*>(lParam);
                         if (pCD->nmcd.dwDrawStage == CDDS_PREPAINT) {
-                            return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
+                            return CDRF_NOTIFYITEMDRAW;
                         } else if (pCD->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
                             if ((int)pCD->nmcd.dwItemSpec == pThis->m_selectedIndex) {
-                                // Don't set colors here, we'll draw manually in POSTPAINT
-                                return CDRF_NOTIFYPOSTPAINT;
+                                pCD->clrTextBk = RGB(100, 150, 255);  // Light blue for selection
+                                pCD->clrText = RGB(255, 255, 255);    // White text
                             } else {
-                                pCD->clrTextBk = RGB(255, 229, 217);  // Peach background for non-selected
-                                pCD->clrText = RGB(0, 0, 0);          // Black text for non-selected
-                                return CDRF_NEWFONT;
+                                pCD->clrTextBk = RGB(255, 229, 217);  // Peach for non-selected
+                                pCD->clrText = RGB(0, 0, 0);          // Black text
                             }
-                        } else if (pCD->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT) {
-                            if ((int)pCD->nmcd.dwItemSpec == pThis->m_selectedIndex) {
-                                // Draw rounded rectangle for selection
-                                HDC hdc = pCD->nmcd.hdc;
-                                RECT rc = pCD->nmcd.rc;
-
-                                // Inflate rect slightly for padding
-                                InflateRect(&rc, -2, -2);
-
-                                // Create rounded rectangle brush
-                                HBRUSH hBrush = CreateSolidBrush(RGB(100, 150, 255));
-                                HPEN hPen = CreatePen(PS_SOLID, 1, RGB(100, 150, 255));
-                                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
-                                HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-
-                                // Draw rounded rectangle
-                                RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
-
-                                SelectObject(hdc, hOldBrush);
-                                SelectObject(hdc, hOldPen);
-                                DeleteObject(hBrush);
-                                DeleteObject(hPen);
-
-                                // Draw text in white
-                                SetTextColor(hdc, RGB(255, 255, 255));
-                                SetBkMode(hdc, TRANSPARENT);
-
-                                return CDRF_SKIPDEFAULT;
-                            }
+                            return CDRF_NEWFONT;
                         }
                     }
                 }
