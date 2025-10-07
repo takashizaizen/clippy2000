@@ -97,16 +97,45 @@ LRESULT CALLBACK HistoryWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                     } else if (pNmhdr->code == NM_CUSTOMDRAW) {
                         NMLVCUSTOMDRAW* pCD = reinterpret_cast<NMLVCUSTOMDRAW*>(lParam);
                         if (pCD->nmcd.dwDrawStage == CDDS_PREPAINT) {
-                            return CDRF_NOTIFYITEMDRAW;
+                            return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
                         } else if (pCD->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
                             if ((int)pCD->nmcd.dwItemSpec == pThis->m_selectedIndex) {
-                                pCD->clrTextBk = RGB(100, 150, 255);  // Light blue background for selection
-                                pCD->clrText = RGB(255, 255, 255);    // White text for selection
+                                // Don't set colors here, we'll draw manually in POSTPAINT
+                                return CDRF_NOTIFYPOSTPAINT;
                             } else {
                                 pCD->clrTextBk = RGB(255, 229, 217);  // Peach background for non-selected
                                 pCD->clrText = RGB(0, 0, 0);          // Black text for non-selected
+                                return CDRF_NEWFONT;
                             }
-                            return CDRF_NEWFONT;
+                        } else if (pCD->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT) {
+                            if ((int)pCD->nmcd.dwItemSpec == pThis->m_selectedIndex) {
+                                // Draw rounded rectangle for selection
+                                HDC hdc = pCD->nmcd.hdc;
+                                RECT rc = pCD->nmcd.rc;
+
+                                // Inflate rect slightly for padding
+                                InflateRect(&rc, -2, -2);
+
+                                // Create rounded rectangle brush
+                                HBRUSH hBrush = CreateSolidBrush(RGB(100, 150, 255));
+                                HPEN hPen = CreatePen(PS_SOLID, 1, RGB(100, 150, 255));
+                                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
+                                HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+
+                                // Draw rounded rectangle
+                                RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
+
+                                SelectObject(hdc, hOldBrush);
+                                SelectObject(hdc, hOldPen);
+                                DeleteObject(hBrush);
+                                DeleteObject(hPen);
+
+                                // Draw text in white
+                                SetTextColor(hdc, RGB(255, 255, 255));
+                                SetBkMode(hdc, TRANSPARENT);
+
+                                return CDRF_SKIPDEFAULT;
+                            }
                         }
                     }
                 }
@@ -240,12 +269,12 @@ bool HistoryWindow::Initialize(HINSTANCE hInstance) {
     int x = (screenWidth - windowWidth) / 2;
     int y = (screenHeight - windowHeight) / 2;
 
-    // Create window without title bar, centered on screen
+    // Create window without title bar, centered on screen (no border to avoid black outline)
     m_hwnd = CreateWindowEx(
         WS_EX_TOPMOST,
         L"Clippy2000HistoryWindow",
         L"Clippy2000 - Clipboard History",
-        WS_POPUP | WS_BORDER,
+        WS_POPUP,
         x, y,
         windowWidth, windowHeight,
         nullptr,
@@ -253,6 +282,13 @@ bool HistoryWindow::Initialize(HINSTANCE hInstance) {
         hInstance,
         this
     );
+
+    // Add rounded corners to the window
+    if (m_hwnd) {
+        // Create rounded rectangle region for window (more rounded with 20px radius)
+        HRGN hRgn = CreateRoundRectRgn(0, 0, windowWidth + 1, windowHeight + 1, 20, 20);
+        SetWindowRgn(m_hwnd, hRgn, TRUE);
+    }
 
     return m_hwnd != nullptr;
 }
@@ -532,6 +568,10 @@ void HistoryWindow::FilterAndDisplay(const std::wstring& filter) {
     RECT rcCurrentWindow;
     GetWindowRect(m_hwnd, &rcCurrentWindow);
     SetWindowPos(m_hwnd, nullptr, 0, 0, 600, newWindowHeight, SWP_NOMOVE | SWP_NOZORDER);
+
+    // Update rounded region to match new window size
+    HRGN hRgn = CreateRoundRectRgn(0, 0, 601, newWindowHeight + 1, 20, 20);
+    SetWindowRgn(m_hwnd, hRgn, TRUE);
 }
 
 void HistoryWindow::OnListDoubleClick() {
