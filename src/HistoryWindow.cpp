@@ -245,7 +245,7 @@ bool HistoryWindow::Initialize(HINSTANCE hInstance) {
     // Create peach background brush
     m_bgBrush = CreateSolidBrush(RGB(255, 229, 217));
 
-    // Register window class
+    // Register window class with drop shadow
     WNDCLASSEX wc = {0};
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.lpfnWndProc = WindowProc;
@@ -253,6 +253,7 @@ bool HistoryWindow::Initialize(HINSTANCE hInstance) {
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = m_bgBrush;
     wc.lpszClassName = L"Clippy2000HistoryWindow";
+    wc.style = CS_DROPSHADOW;
 
     if (!RegisterClassEx(&wc)) {
         // Class might already be registered
